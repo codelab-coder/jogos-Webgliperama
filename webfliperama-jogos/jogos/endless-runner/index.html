@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Endless Runner — WebFliperama</title>
+<style>
+  :root{ --bg:#0b0f1a; --panel:#121a2b; --accent:#00e5a0; --accent2:#ff3b6b; --text:#e8eefc; --muted:#7c8aa8; }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;
+    display:flex;align-items:center;justify-content:center;}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;}
+  h1{margin:0;font-size:22px;letter-spacing:2px;color:var(--accent);text-shadow:0 0 12px rgba(0,229,160,.5);}
+  .hud{display:flex;gap:24px;font-size:14px;color:var(--muted);}
+  .hud b{color:var(--text);}
+  canvas{background:linear-gradient(#182240,#121a2b 60%);border:2px solid #182240;border-radius:10px;}
+  .tip{color:var(--muted);font-size:12px;}
+  .overlay{position:fixed;inset:0;background:rgba(4,6,12,.82);display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;text-align:center;}
+  .overlay.show{display:flex;}
+  .overlay h2{color:var(--accent2);font-size:28px;margin:0;}
+  button{background:var(--accent);color:#04140f;border:none;padding:10px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:15px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ENDLESS RUNNER</h1>
+  <div class="hud"><span>Distância: <b id="score">0</b>m</span><span>Recorde: <b id="best">0</b>m</span></div>
+  <canvas id="game" width="600" height="300"></canvas>
+  <div class="tip">Espaço / ↑ / clique para pular · segure para pulo mais alto</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlayTitle">Fim de jogo</h2>
+  <div id="overlayScore"></div>
+  <button id="restartBtn">Jogar novamente</button>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const GROUND_Y = H - 40;
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayScore = document.getElementById('overlayScore');
+
+  const BEST_KEY = 'webfliperama_runner_best';
+  let best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10);
+  bestEl.textContent = best;
+
+  let player, obstacles, speed, distance, running, spawnTimer, raf, holding;
+
+  function reset(){
+    player = { x: 60, y: GROUND_Y-40, w:34, h:40, vy:0, jumping:false };
+    obstacles = [];
+    speed = 6; distance = 0; running = true; spawnTimer = 60; holding = false;
+    scoreEl.textContent = 0;
+    overlay.classList.remove('show');
+  }
+
+  function jump(){
+    if (!player.jumping && running){
+      player.vy = -12;
+      player.jumping = true;
+    }
+  }
+
+  function endGame(){
+    running = false;
+    const d = Math.floor(distance);
+    if (d > best){ best = d; localStorage.setItem(BEST_KEY, best); bestEl.textContent = best; }
+    overlayTitle.textContent = 'Fim de jogo';
+    overlayScore.textContent = 'Distância: ' + d + 'm';
+    overlay.classList.add('show');
+    // Hook de integração: postScore({ game: 'endless-runner', score: d });
+  }
+
+  window.addEventListener('keydown', e=>{
+    if (e.key===' '||e.key==='ArrowUp'){ jump(); e.preventDefault(); }
+  });
+  canvas.addEventListener('mousedown', jump);
+  canvas.addEventListener('touchstart', e=>{ jump(); e.preventDefault(); });
+
+  function spawnObstacle(){
+    const h = 30 + Math.random()*30;
+    obstacles.push({ x: W+20, y: GROUND_Y-h, w: 22, h });
+  }
+
+  function update(){
+    if (running){
+      distance += speed/20;
+      scoreEl.textContent = Math.floor(distance);
+      speed = 6 + distance/150;
+
+      player.vy += 0.7;
+      player.y += player.vy;
+      if (player.y >= GROUND_Y-player.h){ player.y = GROUND_Y-player.h; player.vy = 0; player.jumping = false; }
+
+      spawnTimer--;
+      if (spawnTimer <= 0){
+        spawnObstacle();
+        spawnTimer = Math.max(35, 75 - Math.floor(distance/20));
+      }
+
+      obstacles.forEach(o=> o.x -= speed);
+      obstacles = obstacles.filter(o=> o.x + o.w > 0);
+
+      for (const o of obstacles){
+        if (player.x < o.x+o.w && player.x+player.w > o.x && player.y < o.y+o.h && player.y+player.h > o.y){
+          endGame();
+          break;
+        }
+      }
+    }
+    draw();
+    raf = requestAnimationFrame(update);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#121a2b';
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = '#182240';
+    ctx.fillRect(0, GROUND_Y, W, H-GROUND_Y);
+    ctx.strokeStyle = '#2a3a66';
+    ctx.beginPath(); ctx.moveTo(0,GROUND_Y); ctx.lineTo(W,GROUND_Y); ctx.stroke();
+
+    ctx.fillStyle = '#00e5a0';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+
+    ctx.fillStyle = '#ff3b6b';
+    obstacles.forEach(o=> ctx.fillRect(o.x, o.y, o.w, o.h));
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', reset);
+  reset();
+  update();
+})();
+</script>
+</body>
+</html>
