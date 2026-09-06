@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Memory Game — WebFliperama</title>
+<style>
+  :root{ --bg:#0b0f1a; --panel:#121a2b; --accent:#00e5a0; --accent2:#ff3b6b; --text:#e8eefc; --muted:#7c8aa8; }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;
+    display:flex;align-items:center;justify-content:center;}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px;}
+  h1{margin:0;font-size:22px;letter-spacing:2px;color:var(--accent);text-shadow:0 0 12px rgba(0,229,160,.5);}
+  .hud{display:flex;gap:24px;font-size:14px;color:var(--muted);}
+  .hud b{color:var(--text);}
+  .board{display:grid;grid-template-columns:repeat(4,80px);grid-gap:10px;}
+  .card{width:80px;height:80px;position:relative;cursor:pointer;perspective:600px;}
+  .card-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;
+    transition:transform .35s;}
+  .card.flipped .card-inner, .card.matched .card-inner{transform:rotateY(180deg);}
+  .face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:34px;backface-visibility:hidden;}
+  .front{background:var(--panel);border:2px solid #182240;}
+  .front::after{content:'?';color:#2a3a66;font-weight:800;font-size:30px;}
+  .back{background:#182240;transform:rotateY(180deg);}
+  .card.matched .back{background:#0d3a2c;box-shadow:0 0 14px rgba(0,229,160,.4);}
+  .tip{color:var(--muted);font-size:12px;}
+  .overlay{position:fixed;inset:0;background:rgba(4,6,12,.82);display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;text-align:center;}
+  .overlay.show{display:flex;}
+  .overlay h2{color:var(--accent);font-size:28px;margin:0;}
+  button{background:var(--accent);color:#04140f;border:none;padding:10px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:15px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MEMORY GAME</h1>
+  <div class="hud"><span>Jogadas: <b id="moves">0</b></span><span>Pares: <b id="pairs">0</b>/8</span><span>Tempo: <b id="time">0</b>s</span></div>
+  <div class="board" id="board"></div>
+  <div class="tip">Encontre todos os pares de emojis</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2>Você venceu!</h2>
+  <div id="overlayScore"></div>
+  <button id="restartBtn">Jogar novamente</button>
+</div>
+
+<script>
+(function(){
+  const EMOJIS = ['🍕','🚀','🎮','🐱','🌟','🎧','🍩','🦄'];
+  const board = document.getElementById('board');
+  const movesEl = document.getElementById('moves');
+  const pairsEl = document.getElementById('pairs');
+  const timeEl = document.getElementById('time');
+  const overlay = document.getElementById('overlay');
+  const overlayScore = document.getElementById('overlayScore');
+
+  let cards, flipped, matches, moves, locked, timer, seconds, running;
+
+  function shuffle(arr){
+    for (let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  }
+
+  function reset(){
+    const deck = shuffle([...EMOJIS, ...EMOJIS]);
+    flipped = []; matches = 0; moves = 0; locked = false; seconds = 0; running = true;
+    movesEl.textContent = 0; pairsEl.textContent = 0; timeEl.textContent = 0;
+    overlay.classList.remove('show');
+    board.innerHTML = '';
+    cards = deck.map((emoji, idx)=>{
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.emoji = emoji;
+      card.dataset.idx = idx;
+      card.innerHTML = `<div class="card-inner"><div class="face front"></div><div class="face back">${emoji}</div></div>`;
+      card.addEventListener('click', ()=>onCardClick(card));
+      board.appendChild(card);
+      return card;
+    });
+    if (timer) clearInterval(timer);
+    timer = setInterval(()=>{ if(running){ seconds++; timeEl.textContent = seconds; } }, 1000);
+  }
+
+  function onCardClick(card){
+    if (locked || card.classList.contains('flipped') || card.classList.contains('matched') || !running) return;
+    card.classList.add('flipped');
+    flipped.push(card);
+
+    if (flipped.length === 2){
+      moves++; movesEl.textContent = moves;
+      locked = true;
+      const [a,b] = flipped;
+      if (a.dataset.emoji === b.dataset.emoji){
+        a.classList.add('matched'); b.classList.add('matched');
+        matches++; pairsEl.textContent = matches;
+        flipped = []; locked = false;
+        if (matches === EMOJIS.length){
+          running = false;
+          clearInterval(timer);
+          overlayScore.textContent = `Concluído em ${moves} jogadas e ${seconds}s`;
+          overlay.classList.add('show');
+          // Hook de integração: postScore({ game: 'memory', score: Math.max(0, 1000 - moves*10 - seconds*2) });
+        }
+      } else {
+        setTimeout(()=>{
+          a.classList.remove('flipped'); b.classList.remove('flipped');
+          flipped = []; locked = false;
+        }, 800);
+      }
+    }
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Bomberman-like — WebFliperama</title>
+<style>
+  :root{ --bg:#0b0f1a; --panel:#121a2b; --accent:#00e5a0; --accent2:#ff3b6b; --text:#e8eefc; --muted:#7c8aa8; }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;
+    display:flex;align-items:center;justify-content:center;}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;}
+  h1{margin:0;font-size:22px;letter-spacing:2px;color:var(--accent);text-shadow:0 0 12px rgba(0,229,160,.5);}
+  .hud{display:flex;gap:24px;font-size:14px;color:var(--muted);}
+  .hud b{color:var(--text);}
+  canvas{background:var(--panel);border:2px solid #182240;border-radius:10px;}
+  .tip{color:var(--muted);font-size:12px;text-align:center;max-width:480px;}
+  .overlay{position:fixed;inset:0;background:rgba(4,6,12,.82);display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;text-align:center;}
+  .overlay.show{display:flex;}
+  .overlay h2{color:var(--accent2);font-size:28px;margin:0;}
+  button{background:var(--accent);color:#04140f;border:none;padding:10px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:15px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>BOMBERMAN-LIKE</h1>
+  <div class="hud"><span>Pontos: <b id="score">0</b></span><span>Inimigos: <b id="enemies">0</b></span><span>Vidas: <b id="lives">3</b></span></div>
+  <canvas id="game" width="494" height="494"></canvas>
+  <div class="tip">Setas / WASD para mover · Espaço para colocar bomba · Destrua os blocos e os inimigos, evite as explosões</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlayTitle">Fim de jogo</h2>
+  <div id="overlayScore"></div>
+  <button id="restartBtn">Jogar novamente</button>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const TILE = 38, COLS = 13, ROWS = 13;
+  const scoreEl = document.getElementById('score');
+  const enemiesEl = document.getElementById('enemies');
+  const livesEl = document.getElementById('lives');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayScore = document.getElementById('overlayScore');
+
+  // tile types: 0 empty, 1 wall (indestructible), 2 block (destructible)
+  let grid, player, bombs, explosions, enemies, score, lives, running, keys={}, raf, moveTimer;
+
+  function buildGrid(){
+    grid = [];
+    for (let y=0;y<ROWS;y++){
+      const row = [];
+      for (let x=0;x<COLS;x++){
+        if (x===0||y===0||x===COLS-1||y===ROWS-1 || (x%2===0 && y%2===0)) row.push(1);
+        else row.push(0);
+      }
+      grid.push(row);
+    }
+    // scatter destructible blocks, keep spawn corners clear
+    const clear = [[1,1],[1,2],[2,1],[COLS-2,ROWS-2],[COLS-2,ROWS-3],[COLS-3,ROWS-2]];
+    for (let y=1;y<ROWS-1;y++){
+      for (let x=1;x<COLS-1;x++){
+        if (grid[y][x]===0 && Math.random()<0.6 && !clear.some(c=>c[0]===x&&c[1]===y)){
+          grid[y][x] = 2;
+        }
+      }
+    }
+  }
+
+  function reset(){
+    buildGrid();
+    player = { x:1, y:1, alive:true };
+    bombs = []; explosions = [];
+    enemies = [];
+    for (let i=0;i<4;i++){
+      let ex,ey;
+      do { ex = Math.floor(Math.random()*(COLS-2))+1; ey = Math.floor(Math.random()*(ROWS-2))+1; }
+      while (grid[ey][ex]!==0 || (Math.abs(ex-1)+Math.abs(ey-1) < 4));
+      enemies.push({x:ex, y:ey, dir: Math.floor(Math.random()*4), moveT: 0});
+    }
+    score = 0; lives = 3; running = true;
+    scoreEl.textContent = 0; enemiesEl.textContent = enemies.length; livesEl.textContent = 3;
+    overlay.classList.remove('show');
+    moveTimer = 0;
+  }
+
+  function endGame(win){
+    running = false;
+    overlayTitle.textContent = win ? 'Você venceu!' : 'Fim de jogo';
+    overlayScore.textContent = 'Pontuação: ' + score;
+    overlay.classList.add('show');
+    // Hook de integração: postScore({ game: 'bomberman-like', score });
+  }
+
+  window.addEventListener('keydown', e=>{
+    keys[e.key.toLowerCase()] = true;
+    if (e.key===' ') { placeBomb(); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+
+  function placeBomb(){
+    if (!running) return;
+    if (bombs.some(b=>b.x===player.x && b.y===player.y)) return;
+    bombs.push({x:player.x, y:player.y, timer:90, power:2});
+  }
+
+  function explode(bomb){
+    const cells = [{x:bomb.x,y:bomb.y}];
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    dirs.forEach(([dx,dy])=>{
+      for (let i=1;i<=bomb.power;i++){
+        const nx = bomb.x+dx*i, ny = bomb.y+dy*i;
+        if (grid[ny] === undefined || grid[ny][nx] === undefined || grid[ny][nx]===1) break;
+        cells.push({x:nx,y:ny});
+        if (grid[ny][nx]===2){ grid[ny][nx]=0; score+=5; break; }
+      }
+    });
+    cells.forEach(c=> explosions.push({x:c.x, y:c.y, timer:20}));
+
+    if (cells.some(c=>c.x===player.x && c.y===player.y)){
+      lives--; livesEl.textContent = lives;
+      if (lives<=0) endGame(false);
+      else { player.x=1; player.y=1; }
+    }
+    enemies.forEach(en=>{
+      if (cells.some(c=>c.x===en.x && c.y===en.y)) { en.dead = true; score += 20; }
+    });
+    enemies = enemies.filter(e=>!e.dead);
+    enemiesEl.textContent = enemies.length;
+    scoreEl.textContent = score;
+    if (running && enemies.length===0) endGame(true);
+  }
+
+  function canMove(x,y){
+    return grid[y] !== undefined && grid[y][x] !== undefined && grid[y][x] !== 1 && grid[y][x] !== 2 &&
+           !bombs.some(b=>b.x===x&&b.y===y);
+  }
+
+  function update(){
+    if (running){
+      moveTimer--;
+      if (moveTimer<=0){
+        let dx=0,dy=0;
+        if (keys['arrowup']||keys['w']) dy=-1;
+        else if (keys['arrowdown']||keys['s']) dy=1;
+        else if (keys['arrowleft']||keys['a']) dx=-1;
+        else if (keys['arrowright']||keys['d']) dx=1;
+        if ((dx||dy) && canMove(player.x+dx, player.y+dy)){
+          player.x += dx; player.y += dy;
+          moveTimer = 7;
+        }
+      }
+
+      bombs.forEach(b=> b.timer--);
+      bombs.filter(b=>b.timer<=0).forEach(explode);
+      bombs = bombs.filter(b=> b.timer>0);
+
+      explosions.forEach(e=> e.timer--);
+      explosions = explosions.filter(e=> e.timer>0);
+
+      enemies.forEach(en=>{
+        en.moveT--;
+        if (en.moveT<=0){
+          const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+          const options = dirs.filter(([dx,dy])=> canMove(en.x+dx, en.y+dy));
+          if (options.length){
+            const [dx,dy] = options[Math.floor(Math.random()*options.length)];
+            en.x += dx; en.y += dy;
+          }
+          en.moveT = 20;
+        }
+        if (en.x===player.x && en.y===player.y && running){
+          lives--; livesEl.textContent = lives;
+          if (lives<=0) endGame(false);
+          else { player.x=1; player.y=1; }
+        }
+      });
+    }
+    draw();
+    raf = requestAnimationFrame(update);
+  }
+
+  function draw(){
+    ctx.fillStyle = '#0d1424';
+    ctx.fillRect(0,0,COLS*TILE,ROWS*TILE);
+    for (let y=0;y<ROWS;y++){
+      for (let x=0;x<COLS;x++){
+        const t = grid[y][x];
+        if (t===1) ctx.fillStyle = '#2a3a66';
+        else if (t===2) ctx.fillStyle = '#3b5a9a';
+        else ctx.fillStyle = '#121a2b';
+        ctx.fillRect(x*TILE, y*TILE, TILE-2, TILE-2);
+      }
+    }
+    ctx.fillStyle = 'rgba(255,120,0,0.8)';
+    explosions.forEach(e=> ctx.fillRect(e.x*TILE+4, e.y*TILE+4, TILE-10, TILE-10));
+
+    ctx.fillStyle = '#222';
+    bombs.forEach(b=>{
+      ctx.beginPath();
+      ctx.arc(b.x*TILE+TILE/2, b.y*TILE+TILE/2, TILE/3, 0, Math.PI*2);
+      ctx.fill();
+    });
+
+    ctx.fillStyle = '#ff3b6b';
+    enemies.forEach(en=> ctx.fillRect(en.x*TILE+6, en.y*TILE+6, TILE-16, TILE-16));
+
+    ctx.fillStyle = '#00e5a0';
+    ctx.fillRect(player.x*TILE+6, player.y*TILE+6, TILE-16, TILE-16);
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', reset);
+  reset();
+  update();
+})();
+</script>
+</body>
+</html>

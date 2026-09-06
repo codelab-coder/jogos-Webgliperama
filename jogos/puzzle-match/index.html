@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Puzzle Match — WebFliperama</title>
+<style>
+  :root{ --bg:#0b0f1a; --panel:#121a2b; --accent:#00e5a0; --accent2:#ff3b6b; --text:#e8eefc; --muted:#7c8aa8; }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;
+    display:flex;align-items:center;justify-content:center;}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;}
+  h1{margin:0;font-size:22px;letter-spacing:2px;color:var(--accent);text-shadow:0 0 12px rgba(0,229,160,.5);}
+  .hud{display:flex;gap:24px;font-size:14px;color:var(--muted);}
+  .hud b{color:var(--text);}
+  canvas{background:var(--panel);border:2px solid #182240;border-radius:10px;}
+  .tip{color:var(--muted);font-size:12px;}
+  .overlay{position:fixed;inset:0;background:rgba(4,6,12,.82);display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;text-align:center;}
+  .overlay.show{display:flex;}
+  .overlay h2{color:var(--accent2);font-size:28px;margin:0;}
+  button{background:var(--accent);color:#04140f;border:none;padding:10px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:15px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PUZZLE MATCH</h1>
+  <div class="hud"><span>Pontos: <b id="score">0</b></span><span>Movimentos: <b id="moves">20</b></span></div>
+  <canvas id="game" width="400" height="400"></canvas>
+  <div class="tip">Clique em duas peças adjacentes para trocá-las e formar 3 ou mais em linha</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlayTitle">Fim de jogo</h2>
+  <div id="overlayScore"></div>
+  <button id="restartBtn">Jogar novamente</button>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const SIZE = 8, TILE = 50;
+  const COLORS = ['#ff3b6b','#00e5a0','#ffe23b','#3bb0ff','#ff9d3b','#b06bff'];
+  const scoreEl = document.getElementById('score');
+  const movesEl = document.getElementById('moves');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayScore = document.getElementById('overlayScore');
+
+  let grid, score, moves, selected, running, animLock;
+
+  function randColor(){ return Math.floor(Math.random()*COLORS.length); }
+
+  function buildGrid(){
+    grid = [];
+    for (let y=0;y<SIZE;y++){
+      const row = [];
+      for (let x=0;x<SIZE;x++){
+        let c;
+        do {
+          c = randColor();
+        } while (
+          (x>=2 && row[x-1]===c && row[x-2]===c) ||
+          (y>=2 && grid[y-1][x]===c && grid[y-2][x]===c)
+        );
+        row.push(c);
+      }
+      grid.push(row);
+    }
+  }
+
+  function reset(){
+    buildGrid();
+    score = 0; moves = 20; selected = null; running = true; animLock = false;
+    scoreEl.textContent = 0; movesEl.textContent = 20;
+    overlay.classList.remove('show');
+    draw();
+  }
+
+  function endGame(){
+    running = false;
+    overlayTitle.textContent = 'Fim de jogo';
+    overlayScore.textContent = 'Pontuação: ' + score;
+    overlay.classList.add('show');
+    // Hook de integração: postScore({ game: 'puzzle-match', score });
+  }
+
+  function findMatches(){
+    const matched = Array.from({length:SIZE}, ()=>Array(SIZE).fill(false));
+    for (let y=0;y<SIZE;y++){
+      let run=1;
+      for (let x=1;x<=SIZE;x++){
+        if (x<SIZE && grid[y][x]===grid[y][x-1]) run++;
+        else {
+          if (run>=3) for (let k=0;k<run;k++) matched[y][x-1-k]=true;
+          run=1;
+        }
+      }
+    }
+    for (let x=0;x<SIZE;x++){
+      let run=1;
+      for (let y=1;y<=SIZE;y++){
+        if (y<SIZE && grid[y][x]===grid[y-1][x]) run++;
+        else {
+          if (run>=3) for (let k=0;k<run;k++) matched[y-1-k][x]=true;
+          run=1;
+        }
+      }
+    }
+    return matched;
+  }
+
+  function applyGravity(){
+    for (let x=0;x<SIZE;x++){
+      let pointer = SIZE-1;
+      for (let y=SIZE-1;y>=0;y--){
+        if (grid[y][x] !== null){
+          grid[pointer][x] = grid[y][x];
+          if (pointer !== y) grid[y][x] = null;
+          pointer--;
+        }
+      }
+      for (let y=pointer;y>=0;y--) grid[y][x] = randColor();
+    }
+  }
+
+  function resolveMatches(){
+    let matched = findMatches();
+    let any = false;
+    while (matched.some(row=>row.some(v=>v))){
+      any = true;
+      let count = 0;
+      for (let y=0;y<SIZE;y++) for (let x=0;x<SIZE;x++) if (matched[y][x]){ grid[y][x]=null; count++; }
+      score += count*10;
+      scoreEl.textContent = score;
+      applyGravity();
+      matched = findMatches();
+    }
+    return any;
+  }
+
+  function swap(a,b){
+    const tmp = grid[a.y][a.x];
+    grid[a.y][a.x] = grid[b.y][b.x];
+    grid[b.y][b.x] = tmp;
+  }
+
+  canvas.addEventListener('click', e=>{
+    if (!running || animLock) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX-rect.left)*(canvas.width/rect.width)/TILE);
+    const y = Math.floor((e.clientY-rect.top)*(canvas.height/rect.height)/TILE);
+    if (x<0||y<0||x>=SIZE||y>=SIZE) return;
+
+    if (!selected){
+      selected = {x,y};
+      draw();
+      return;
+    }
+    const isAdjacent = Math.abs(selected.x-x)+Math.abs(selected.y-y) === 1;
+    if (!isAdjacent){
+      selected = {x,y};
+      draw();
+      return;
+    }
+    const a = selected, b = {x,y};
+    selected = null;
+    swap(a,b);
+    const matched = findMatches();
+    if (matched.some(row=>row.some(v=>v))){
+      moves--; movesEl.textContent = moves;
+      resolveMatches();
+      draw();
+      if (moves<=0) setTimeout(endGame, 300);
+    } else {
+      swap(a,b); // revert invalid move
+      draw();
+    }
+  });
+
+  function draw(){
+    ctx.fillStyle = '#121a2b';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    for (let y=0;y<SIZE;y++){
+      for (let x=0;x<SIZE;x++){
+        const c = grid[y][x];
+        ctx.fillStyle = COLORS[c];
+        const px = x*TILE, py = y*TILE;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(px+4,py+4,TILE-8,TILE-8,8) : ctx.rect(px+4,py+4,TILE-8,TILE-8);
+        ctx.fill();
+        if (selected && selected.x===x && selected.y===y){
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(px+3,py+3,TILE-6,TILE-6);
+        }
+      }
+    }
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>
